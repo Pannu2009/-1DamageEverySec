@@ -6,7 +6,7 @@ local player = Players.LocalPlayer
 local WallEvent = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("WallEvent")
 
 local canAttack = true
-local attackCooldown = 0.5 -- Time between swings
+local attackCooldown = 0.4
 
 Tool.Activated:Connect(function()
 	if not canAttack then return end
@@ -18,11 +18,11 @@ Tool.Activated:Connect(function()
 		return 
 	end
 
-	-- Raycast forward to hit wall
 	local hrp = char:FindFirstChild("HumanoidRootPart")
 	if hrp then
 		local raycastParams = RaycastParams.new()
-		raycastParams.FilterAncestorsInstances = {char}
+		-- FIX: Use FilterDescendantsInstances instead of FilterAncestorsInstances
+		raycastParams.FilterDescendantsInstances = {char}
 		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
 
 		local rayResult = workspace:Raycast(hrp.Position, hrp.CFrame.LookVector * 10, raycastParams)
@@ -30,7 +30,6 @@ Tool.Activated:Connect(function()
 		if rayResult and rayResult.Instance then
 			local hitPart = rayResult.Instance
 			if hitPart.Name:find("Wall") then
-				-- Get damage attribute set by MainServer
 				local damageVal = Tool:GetAttribute("Damage") or 1
 				WallEvent:FireServer("DamageWall", damageVal)
 			end
@@ -40,4 +39,3 @@ Tool.Activated:Connect(function()
 	task.wait(attackCooldown)
 	canAttack = true
 end)
-
