@@ -1,5 +1,5 @@
 local rep = game:GetService("ReplicatedStorage")
-local wallConfig = require(rep:WaitForChild("Shared"):WaitForChild("WallsConfig"))
+local wallConfig = require(rep:WaitForChild("Shared"):WaitForChild("WallConfig"))
 local wallFolder = workspace:WaitForChild("Map"):WaitForChild("walls")
 
 for groupIndex, groupData in ipairs(wallConfig.Groups) do
@@ -12,7 +12,7 @@ for groupIndex, groupData in ipairs(wallConfig.Groups) do
 	end
 	
 	local walls = groupFolder:GetChildren()
-	table.sort(walls,function(a,b)
+	table.sort(walls, function(a, b)
 		local NumA = tonumber(a.Name:match("%d+")) or 0
 		local NumB = tonumber(b.Name:match("%d+")) or 0
 		return NumA < NumB
@@ -21,15 +21,17 @@ for groupIndex, groupData in ipairs(wallConfig.Groups) do
 	for i, wall in ipairs(walls) do
 		if not wall:IsA("BasePart") then continue end
 		
-		local hp = groupData.walls[i]
-		wall:SetAttribute("HP",hp)
-		wall:SetAttribute("MaxHp",hp)
-		wall:SetAttribute("GroupIndex",groupIndex)
-		wall:SetAttribute("WallIndex",i)
+		local hp = groupData.Healths[i]
+		if not hp then continue end
+		
+		wall:SetAttribute("HP", hp)
+		wall:SetAttribute("MaxHp", hp)
+		wall:SetAttribute("GroupIndex", groupIndex)
+		wall:SetAttribute("WallIndex", i)
 		
 		wall.Anchored = true
-		wall.CanCollide = false
-		wall.Transparency = 1
+		wall.CanCollide = true
+		wall.Transparency = 0
 		
 		local existing = wall:FindFirstChild("HealthBar")
 		if existing then
@@ -53,8 +55,7 @@ for groupIndex, groupData in ipairs(wallConfig.Groups) do
 		label.TextScaled = true
 		label.Font = Enum.Font.GothamBold
 		label.Parent = healthBar
-		
 	end
-	print("WallSetup Congired "..groupName)
+	print("WallSetup Configured " .. groupName)
 end
 print("Complete setup")
