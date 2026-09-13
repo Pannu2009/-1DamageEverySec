@@ -4,14 +4,21 @@ local wallFolder = workspace:WaitForChild("Map"):WaitForChild("walls")
 
 for groupIndex, groupData in ipairs(wallConfig.Groups) do
 	local groupName = "Group" .. groupIndex
-	local groupFolder = wallFolder:WaitForChild(groupName)
+	-- Use FindFirstChild so missing groups in Workspace don't cause an infinite yield error
+	local groupFolder = wallFolder:FindFirstChild(groupName)
 	
 	if not groupFolder then
-		warn("Group folder not found: " .. groupName)
 		continue
 	end
 	
-	local walls = groupFolder:GetChildren()
+	local walls = {}
+	for _, child in ipairs(groupFolder:GetChildren()) do
+		-- ONLY select actual wall parts, ignore Win parts like WinsGroup1
+		if child:IsA("BasePart") and child.Name:find("Wall") then
+			table.insert(walls, child)
+		end
+	end
+	
 	table.sort(walls, function(a, b)
 		local NumA = tonumber(a.Name:match("%d+")) or 0
 		local NumB = tonumber(b.Name:match("%d+")) or 0
@@ -19,8 +26,6 @@ for groupIndex, groupData in ipairs(wallConfig.Groups) do
 	end)
 	
 	for i, wall in ipairs(walls) do
-		if not wall:IsA("BasePart") then continue end
-		
 		local hp = groupData.Healths[i]
 		if not hp then continue end
 		
@@ -40,16 +45,17 @@ for groupIndex, groupData in ipairs(wallConfig.Groups) do
 		
 		local healthBar = Instance.new("BillboardGui")
 		healthBar.Name = "HealthBar"
-		healthBar.Size = UDim2.new(0, 200, 0, 50)
-		healthBar.StudsOffset = Vector3.new(0, 5, 0)
+		healthBar.Size = UDim2.new(0, 150, 0, 40)
+		healthBar.StudsOffset = Vector3.new(0, 4, 0)
 		healthBar.AlwaysOnTop = true
+		healthBar.MaxDistance = 100
+		healthBar.Enabled = true
 		healthBar.Parent = wall
-		healthBar.Enabled = false
 		
 		local label = Instance.new("TextLabel")
 		label.Size = UDim2.new(1, 0, 1, 0)
 		label.BackgroundTransparency = 0.5
-		label.TextColor3 = Color3.new(1, 0, 0)
+		label.TextColor3 = Color3.new(1, 1, 1)
 		label.BackgroundColor3 = Color3.new(0, 0, 0)
 		label.Text = "HP: " .. hp .. "/" .. hp
 		label.TextScaled = true
