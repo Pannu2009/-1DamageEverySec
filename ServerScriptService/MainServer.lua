@@ -21,10 +21,11 @@ local function updateStats(player)
 	if not Stats or not utils then return end
 
 	local wins = Stats:WaitForChild("Wins")
+	local shards  Stats:WaitForChild("Shards")
 	local damage = utils:WaitForChild("Damage")
 	local rebirth = utils:WaitForChild("Rebirth")
 
-	if not (wins and damage and rebirth) then return end
+	if not (wins and shards and damage and rebirth) then return end
 
 	local multi = GetMuli(rebirth.Value)
 	local finalDamage = damage.Value * multi ------ multi is here add gamepass later
@@ -36,10 +37,18 @@ local function updateStats(player)
 			Sword:SetAttribute("Damage",finalDamage)
 		end
 	end
+	-- BUGFIX: also update the sword while it's unequipped (sitting in Backpack)
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack then
+		local Sword = backpack:FindFirstChild("Sword")
+		if Sword then
+			Sword:SetAttribute("Damage", finalDamage)
+		end
+	end
 
 	GuiRemote:FireClient(player, {
 		Damage = damage.Value,
-		finalDamage
+		FinalDamage = finalDamage -- BUGFIX: was a bare value (array item), not a named key
 	})
 end
 
@@ -57,6 +66,11 @@ local function setupPlayer(player)
 	wins.Name = "Wins"
 	wins.Value = 0
 	wins.Parent = stats
+	
+	local Shards = Instance.new("IntValue")
+	Shards.Name = "Shards"
+	Shards.Value = 0
+	Shards.Parent = stats
 
 	local damage = Instance.new("NumberValue")
 	damage.Name = "Damage"
@@ -76,6 +90,7 @@ local function setupPlayer(player)
 		damage.Value = data.Damage or 1
 		wins.Value = data.Wins or 0
 		rebirth.Value = data.Rebirths or 0
+		Shards.Value = data.Shards or 0
 	end
 
 	damage.Changed:Connect(function() updateStats(player) end)
@@ -101,8 +116,9 @@ local function SavePlayer(player)
 	local wins = stats:FindFirstChild("Wins")
 	local damage = utils:FindFirstChild("Damage")
 	local rebirth = utils:FindFirstChild("Rebirth")
+	local shards = stats:FindFirstChild("Shards")
 
-	if not (wins and damage and rebirth) then return end
+	if not (wins and shards and damage and rebirth) then return end
 
 	pcall(function()
 		DataStore:SetAsync("Player_" .. player.UserId, {
@@ -119,10 +135,11 @@ RebirthEvent.OnServerEvent:Connect(function(player)
 	if not (Stats and Utils) then return end
 
 	local Wins = Stats:FindFirstChild("Wins")
+	local Shards = Stats:FindFirstChild("Shards")
 	local Rebirth = Utils:FindFirstChild("Rebirth")
 	local Damage = Utils:FindFirstChild("Damage")
 
-	if not (Wins and Rebirth and Damage) then return end
+	if not (Wins and Shards and Rebirth and Damage) then return end
 
 	local nextLevel = Rebirth.Value + 1
 	local required = Shared_.Data[nextLevel]
@@ -133,7 +150,7 @@ RebirthEvent.OnServerEvent:Connect(function(player)
 	end
 
 	if Wins.Value >= required.WinsReq then
-		Wins.Value = 0
+		Wins.Value -= required.WinsReq
 		Rebirth.Value += 1
 		Damage.Value = 1 -- reset damage
 		RebirthEvent:FireClient(player,true," rebirthed, You are now x"..GetMuli(Rebirth.Value))
@@ -146,6 +163,30 @@ end)
 Players.PlayerAdded:Connect(function(player)
 	setupPlayer(player)
 end)
+
+for _, player in Players:GetPlayers() do
+	setupPlayer(player)
+end
 Players.PlayerRemoving:Connect(function(plr)  
 	SavePlayer(plr)
+end)
+
+game:BindToClose(function()
+	for _, player in Players:GetPlayers() do
+		SavePlayer(player)
+	end
+end)
+
+
+task.spawn(function()
+	while true do
+		task.wait(1)
+		for _, player in Players:GetPlayers() do
+			local utils = player:FindFirstChild("Utils")
+			local damage = utils and utils:FindFirstChild("Damage")
+			if damage then
+				damage.Value += 1
+			end
+		end
+	end
 end)
