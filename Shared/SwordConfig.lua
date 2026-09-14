@@ -9,7 +9,7 @@ SwordConfig.DefaultModelName = "sword"
 SwordConfig.AttackCooldown = 0.4
 
 SwordConfig.Swords = {
-	{Name = "Rusty Sword", Cost = 0,   Multi = 1.0},
+	{Name = "Rusty Sword", Cost = 0,   Multi = 0.5},
 	{Name = "Iron Blade",  Cost = 500, Multi = 1.5},
 	{Name = "Void Blade",  Cost = 0,   Multi = 7.0, BossDrop = true},
 }

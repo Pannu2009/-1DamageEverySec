@@ -1,4 +1,7 @@
--- Client init: wires up all UI modules
+-- Client init: wires up all UI and gameplay client modules
 
 local FrontFaceGui = require(script:WaitForChild("FrontFaceGui"))
+local SwordClient = require(game:GetService("ReplicatedStorage").Shared:WaitForChild("SwordClient"))
+
 FrontFaceGui.Init()
+SwordClient.Init()

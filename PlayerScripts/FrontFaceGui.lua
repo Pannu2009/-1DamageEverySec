@@ -8,6 +8,7 @@ local Rep = game:GetService("ReplicatedStorage")
 local RebirthConfig = require(Rep.Shared.RebirthConfig)
 local EverySec = Rep.Remotes.EverySec
 local RebirthEvent = Rep.Remotes.RebirthEvent
+local SwordConfig = require(Rep.Shared.SwordConfig)
 
 local player = Players.LocalPlayer
 
@@ -66,7 +67,7 @@ function module.Init()
 	-- Damage label (shows final damage = base * rebirth multiplier)
 	if damageLabel then
 		if damage then
-			damageLabel.Text = fmt(damage.Value * getMulti(rebirth and rebirth.Value or 0))
+			damageLabel.Text = fmt(damage.Value * getMulti(rebirth and rebirth.Value or 0) * SwordConfig.GetMulti(SwordConfig.DefaultSword))
 		end
 		EverySec.OnClientEvent:Connect(function(payload)
 			if type(payload) == "table" and payload.FinalDamage then

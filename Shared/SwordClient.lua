@@ -1,52 +1,81 @@
 -- SwordClient
--- Client only detects the wall the player is looking at.
--- The server decides how much damage is actually dealt.
+-- Runs from PlayerScripts/Init and wires every sword Tool to wall attacks.
+-- The client only tells the server which wall it is trying to hit.
 
-local Tool = script.Parent
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local WallEvent = Remotes:WaitForChild("WallEvent")
+local SwordConfig = require(ReplicatedStorage.Shared:WaitForChild("SwordConfig"))
 
-local attackCooldown = 0.4
-local canAttack = true
+local module = {}
+local connected = setmetatable({}, { __mode = "k" })
 
-Tool.Activated:Connect(function()
-	if not canAttack then return end
-	canAttack = false
+local function connectTool(tool)
+	if not tool:IsA("Tool") or connected[tool] then return end
+	connected[tool] = true
 
-	local char = player.Character
-	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	local attacking = false
+	local cooldown = SwordConfig.AttackCooldown or 0.4
 
-	if hrp then
-		local raycastParams = RaycastParams.new()
-		raycastParams.FilterDescendantsInstances = {char}
-		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	tool.Activated:Connect(function()
+		if attacking then return end
+		if tool.Parent ~= player.Character then return end
+		attacking = true
 
-		local result = workspace:Raycast(
-			hrp.Position,
-			hrp.CFrame.LookVector * 10,
-			raycastParams
-		)
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			local params = RaycastParams.new()
+			params.FilterDescendantsInstances = {char}
+			params.FilterType = Enum.RaycastFilterType.Exclude
 
-		if result and result.Instance then
-			local hitPart = result.Instance
-			local groupIndex = hitPart:GetAttribute("GroupIndex")
-			local wallIndex = hitPart:GetAttribute("WallIndex")
+			local result = workspace:Raycast(hrp.Position, hrp.CFrame.LookVector * 16, params)
+			if result and result.Instance then
+				local hitPart = result.Instance
+				local groupIndex = hitPart:GetAttribute("GroupIndex")
+				local wallIndex = hitPart:GetAttribute("WallIndex")
 
-			if hitPart.Name:find("Wall") and groupIndex and wallIndex then
-				-- Send only the identity of the wall.
-				-- Server calculates the real damage from the player's sword.
-				WallEvent:FireServer("DamageWall", {
-					Group = groupIndex,
-					Wall = wallIndex,
-				})
+				if hitPart.Name:match("^Wall%d+$") and groupIndex and wallIndex then
+					WallEvent:FireServer("DamageWall", {
+						Group = tonumber(groupIndex),
+						Wall = tonumber(wallIndex),
+					})
+				end
 			end
 		end
+
+		task.delay(cooldown, function()
+			attacking = false
+		end)
+	end)
+end
+
+local function scan(container)
+	if not container then return end
+	for _, child in ipairs(container:GetChildren()) do
+		connectTool(child)
+	end
+end
+
+function module.Init()
+	local backpack = player:WaitForChild("Backpack", 10)
+	if backpack then
+		backpack.ChildAdded:Connect(connectTool)
+		scan(backpack)
 	end
 
-	task.wait(attackCooldown)
-	canAttack = true
-end)
+	local function characterAdded(character)
+		character.ChildAdded:Connect(connectTool)
+		scan(character)
+	end
+
+	player.CharacterAdded:Connect(characterAdded)
+	if player.Character then
+		characterAdded(player.Character)
+	end
+end
+
+return module
