@@ -1,0 +1,4 @@
+-- Client init: wires up all UI modules
+
+local FrontFaceGui = require(script:WaitForChild("FrontFaceGui"))
+FrontFaceGui.Init()
