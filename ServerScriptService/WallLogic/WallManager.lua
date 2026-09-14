@@ -1,148 +1,180 @@
+-- WallManager
+-- Server-authoritative wall progression and win claiming.
+-- Players may keep progressing without claiming their pending wins.
+-- Touching a WinsGroup pad banks the pending wins and returns the player to spawn.
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local WallConfig = require(ReplicatedStorage.Shared:WaitForChild("WallsConfig"))
-local WallEvent = ReplicatedStorage.Remotes.WallEvent
-local RebirthEvent = ReplicatedStorage.Remotes.RebirthEvent
+local WallConfig = require(ReplicatedStorage.Shared:WaitForChild("WallConfig"))
+local SwordConfig = require(ReplicatedStorage.Shared:WaitForChild("SwordConfig"))
+
+local Remotes = ReplicatedStorage:WaitForChild("Remotes")
+local WallEvent = Remotes:WaitForChild("WallEvent")
+local RebirthEvent = Remotes:WaitForChild("RebirthEvent")
+
 local wallFolder = workspace:WaitForChild("Map"):WaitForChild("walls")
 
-local WallManager = {}
 local PlayerProgress = {}
 local claimDebounce = {}
+local hitDebounce = {}
 
--- Read damage from the server-side sword attribute (never trust the client)
-local function getSwordDamage(player)
+local MAX_HIT_DISTANCE = 16
+local SERVER_HIT_COOLDOWN = 0.35
+
+local function getPlayerSword(player)
 	local char = player.Character
-	local sword = char and char:FindFirstChild("Sword")
-	if not sword and player:FindFirstChild("Backpack") then
-		sword = player.Backpack:FindFirstChild("Sword")
-	end
-	if sword then
-		local d = sword:GetAttribute("Damage")
-		if typeof(d) == "number" and d > 0 then
-			return d
+	local backpack = player:FindFirstChild("Backpack")
+
+	local function find(container)
+		if not container then return nil end
+
+		for _, item in ipairs(container:GetChildren()) do
+			if item:IsA("Tool") and item:GetAttribute("IsSword") == true then
+				return item
+			end
 		end
+
+		return container:FindFirstChild("Sword") or container:FindFirstChild("sword")
 	end
+
+	return find(char) or find(backpack)
+end
+
+local function getSwordDamage(player)
+	local sword = getPlayerSword(player)
+	if not sword then
+		return 1
+	end
+
+	local damage = sword:GetAttribute("Damage")
+	if typeof(damage) == "number" and damage > 0 then
+		return damage
+	end
+
+	local swordName = sword:GetAttribute("SwordName")
+	if typeof(swordName) == "string" then
+		return SwordConfig.GetMulti(swordName)
+	end
+
 	return 1
 end
 
--- Teleport the player in front of a wall
-local function teleportToWall(player, groupIndex, wallIndex)
-	local char = player.Character
-	if not char then return end
-	local spawnLoc = workspace:FindFirstChild("SpawnLocation")
-	local folder = wallFolder:FindFirstChild("Group" .. groupIndex)
-	local wall = folder and folder:FindFirstChild("Wall" .. wallIndex)
-	if wall and spawnLoc then
-		char:PivotTo(CFrame.new(
-			wall.Position.X,
-			spawnLoc.Position.Y + 3,
-			wall.Position.Z + 14
-		))
-	elseif spawnLoc then
-		char:PivotTo(CFrame.new(spawnLoc.Position + Vector3.new(0, 3, 0)))
-	end
+local function getWall(groupIndex, wallIndex)
+	local groupFolder = wallFolder:FindFirstChild("Group" .. groupIndex)
+	return groupFolder and groupFolder:FindFirstChild("Wall" .. wallIndex)
 end
 
--- Tell the client which wall is current so it can show the wall GUI
+local function notifyProgress(player)
+	local data = PlayerProgress[player.UserId]
+	if not data then return end
+
+	local group = WallConfig.Groups[data.GroupIndex]
+	if not group then return end
+
+	WallEvent:FireClient(player, "Progress", {
+		Zone = group.Name,
+		GroupIndex = data.GroupIndex,
+		WallIndex = data.WallIndex,
+		PendingWins = data.PendingWins,
+	})
+end
+
 local function notifyNewWall(player)
 	local data = PlayerProgress[player.UserId]
 	if not data then return end
+
+	local maxHp = WallConfig.GetMaxHp(data.GroupIndex, data.WallIndex)
+	if maxHp <= 0 then
+		return
+	end
+
 	WallEvent:FireClient(player, "NewWall", {
 		GroupIndex = data.GroupIndex,
 		WallIndex = data.WallIndex,
 		HP = data.CurrentHP,
-		MaxHP = WallConfig.GetMaxHP(data.GroupIndex, data.WallIndex),
+		MaxHP = maxHp,
 	})
 end
 
--- Claiming wins is OPTIONAL: it banks the unclaimed wins the player has
--- earned so far and resets them back to Group 1. Players can also just
--- keep advancing zones to earn even more unclaimed wins.
-local function claimWin(player)
-	if claimDebounce[player.UserId] then return end
-	claimDebounce[player.UserId] = true
-	task.delay(2, function()
-		claimDebounce[player.UserId] = nil
-	end)
-
+local function resetProgress(player)
 	local data = PlayerProgress[player.UserId]
-	if not data or data.PendingWins <= 0 then return end
+	if not data then return end
 
-	local stats = player:FindFirstChild("leaderstats")
-	if stats and stats:FindFirstChild("Wins") then
-		stats.Wins.Value += data.PendingWins
-	end
-	data.TotalWins += data.PendingWins
-	data.PendingWins = 0
-
-	-- Reset back to the first zone
 	data.GroupIndex = 1
 	data.WallIndex = 1
-	data.CurrentHP = WallConfig.GetMaxHP(1, 1)
-
-	-- Back to spawn
-	local spawnLoc = workspace:FindFirstChild("SpawnLocation")
-	if player.Character and spawnLoc then
-		player.Character:PivotTo(CFrame.new(spawnLoc.Position + Vector3.new(0, 3, 0)))
-	end
+	data.CurrentHP = WallConfig.GetMaxHp(1, 1)
+	data.PendingWins = 0
 
 	WallEvent:FireClient(player, "ResetProgress")
 	notifyNewWall(player)
-	WallEvent:FireClient(player, "Progress", {
-		Zone = WallConfig.Groups[1].Name,
-		GroupIndex = 1,
-		PendingWins = 0,
-	})
+	notifyProgress(player)
 end
 
--- Initialize player session data
+local function teleportToSpawn(player)
+	local spawnLoc = workspace:FindFirstChild("SpawnLocation")
+	local char = player.Character
+	if char and spawnLoc then
+		char:PivotTo(CFrame.new(spawnLoc.Position + Vector3.new(0, 3, 0)))
+	end
+end
+
+local function claimWin(player)
+	local userId = player.UserId
+	if claimDebounce[userId] then return end
+	claimDebounce[userId] = true
+	task.delay(1.5, function()
+		claimDebounce[userId] = nil
+	end)
+
+	local data = PlayerProgress[userId]
+	if not data or data.PendingWins <= 0 then
+		return
+	end
+
+	local stats = player:FindFirstChild("leaderstats")
+	local wins = stats and stats:FindFirstChild("Wins")
+	if not wins then return end
+
+	wins.Value += data.PendingWins
+	data.TotalWins += data.PendingWins
+
+	teleportToSpawn(player)
+	resetProgress(player)
+end
+
 local function onPlayerAdded(player)
 	PlayerProgress[player.UserId] = {
 		GroupIndex = 1,
 		WallIndex = 1,
-		CurrentHP = WallConfig.GetMaxHP(1, 1),
+		CurrentHP = WallConfig.GetMaxHp(1, 1),
 		TotalWins = 0,
 		PendingWins = 0,
 	}
-	task.delay(2, function()
-		if PlayerProgress[player.UserId] then
-			notifyNewWall(player)
-			WallEvent:FireClient(player, "Progress", {
-				Zone = WallConfig.Groups[1].Name,
-				GroupIndex = 1,
-				PendingWins = 0,
-			})
-		end
+
+	task.delay(1, function()
+		if not PlayerProgress[player.UserId] then return end
+		notifyNewWall(player)
+		notifyProgress(player)
 	end)
 end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
-for _, player in Players:GetPlayers() do
+for _, player in ipairs(Players:GetPlayers()) do
 	onPlayerAdded(player)
 end
 
 Players.PlayerRemoving:Connect(function(player)
-	PlayerProgress[player.UserId] = nil
-	claimDebounce[player.UserId] = nil
+	local userId = player.UserId
+	PlayerProgress[userId] = nil
+	claimDebounce[userId] = nil
+	hitDebounce[userId] = nil
 end)
 
--- Rebirth resets everything, including unclaimed wins
+-- Rebirth is intentionally connected here too so wall progress resets
+-- at the same time as the player's rebirth.
 RebirthEvent.OnServerEvent:Connect(function(player)
-	local data = PlayerProgress[player.UserId]
-	if data then
-		data.GroupIndex = 1
-		data.WallIndex = 1
-		data.CurrentHP = WallConfig.GetMaxHP(1, 1)
-		data.PendingWins = 0
-		WallEvent:FireClient(player, "ResetProgress")
-		notifyNewWall(player)
-		WallEvent:FireClient(player, "Progress", {
-			Zone = WallConfig.Groups[1].Name,
-			GroupIndex = 1,
-			PendingWins = 0,
-		})
-	end
+	resetProgress(player)
 end)
 
 WallEvent.OnServerEvent:Connect(function(player, action, payload)
@@ -150,58 +182,87 @@ WallEvent.OnServerEvent:Connect(function(player, action, payload)
 	if not data then return end
 
 	if action == "DamageWall" then
-		local group = WallConfig.Groups[data.GroupIndex]
-		if not group then return end
-		if data.WallIndex > #group.Healths then return end
-
-		-- Verify the player is hitting THEIR current wall
 		if typeof(payload) ~= "table" then return end
-		if payload.Group ~= data.GroupIndex or payload.Wall ~= data.WallIndex then
+
+		local groupIndex = tonumber(payload.Group)
+		local wallIndex = tonumber(payload.Wall)
+		if not groupIndex or not wallIndex then return end
+
+		-- The client may only request damage against its current wall.
+		if groupIndex ~= data.GroupIndex or wallIndex ~= data.WallIndex then
 			return
 		end
+
+		local group = WallConfig.Groups[data.GroupIndex]
+		if not group then return end
+		if data.WallIndex > WallConfig.GetWallCount(data.GroupIndex) then return end
+
+		local wall = getWall(data.GroupIndex, data.WallIndex)
+		if not wall then return end
+
+		local char = player.Character
+		local hrp = char and char:FindFirstChild("HumanoidRootPart")
+		if not hrp then return end
+
+		-- Server-side distance validation.
+		if (hrp.Position - wall.Position).Magnitude > MAX_HIT_DISTANCE then
+			return
+		end
+
+		-- Server-side rate limit so the client cannot spam the RemoteEvent.
+		local now = os.clock()
+		local lastHit = hitDebounce[player.UserId] or 0
+		if now - lastHit < SERVER_HIT_COOLDOWN then
+			return
+		end
+		hitDebounce[player.UserId] = now
+
+		local sword = getPlayerSword(player)
+		if not sword or not sword:IsA("Tool") then return end
 
 		local damage = getSwordDamage(player)
 		data.CurrentHP = math.max(0, data.CurrentHP - damage)
 
 		if data.CurrentHP <= 0 then
 			local brokenGroup = data.GroupIndex
-			local brokenIndex = data.WallIndex
-			data.WallIndex += 1
+			local brokenWall = data.WallIndex
 
 			WallEvent:FireClient(player, "BreakWall", {
 				GroupIndex = brokenGroup,
-				WallIndex = brokenIndex,
+				WallIndex = brokenWall,
 			})
 
-			if data.WallIndex > #group.Healths then
-				-- Zone finished! Bank the reward as unclaimed wins and
-				-- AUTO-ADVANCE to the next zone. The player does NOT need
-				-- to claim wins to keep going - claiming is their choice.
-				data.PendingWins += (group.WinReward or 1)
+			data.WallIndex += 1
+
+			if data.WallIndex > WallConfig.GetWallCount(data.GroupIndex) then
+				-- Zone completed. The reward is now UNCLAIMED.
+				-- Do NOT teleport the player: they can choose to continue
+				-- physically into the next zone.
+				data.PendingWins += WallConfig.GetWinReward(data.GroupIndex)
+
 				local nextGroup = data.GroupIndex + 1
-				if nextGroup > #WallConfig.Groups then
-					nextGroup = 1 -- loop back to the first zone after the last one
+				if WallConfig.Groups[nextGroup] then
+					data.GroupIndex = nextGroup
+					data.WallIndex = 1
+					data.CurrentHP = WallConfig.GetMaxHp(nextGroup, 1)
+				else
+					-- Final configured zone reached. Stay at the final zone;
+					-- this leaves the end-game/boss expansion open for later.
+					data.WallIndex = WallConfig.GetWallCount(data.GroupIndex)
+					data.CurrentHP = 0
 				end
-				data.GroupIndex = nextGroup
-				data.WallIndex = 1
-				data.CurrentHP = WallConfig.GetMaxHP(nextGroup, 1)
-				teleportToWall(player, nextGroup, 1)
-				WallEvent:FireClient(player, "Progress", {
-					Zone = WallConfig.Groups[nextGroup].Name,
-					GroupIndex = nextGroup,
-					PendingWins = data.PendingWins,
-				})
 			else
-				data.CurrentHP = WallConfig.GetMaxHP(data.GroupIndex, data.WallIndex)
+				data.CurrentHP = WallConfig.GetMaxHp(data.GroupIndex, data.WallIndex)
 			end
+
+			notifyProgress(player)
 			notifyNewWall(player)
 		else
-			-- Wall still standing: update the wall GUI with the new HP
 			WallEvent:FireClient(player, "Damage", {
 				GroupIndex = data.GroupIndex,
 				WallIndex = data.WallIndex,
 				HP = data.CurrentHP,
-				MaxHP = WallConfig.GetMaxHP(data.GroupIndex, data.WallIndex),
+				MaxHP = WallConfig.GetMaxHp(data.GroupIndex, data.WallIndex),
 			})
 		end
 
@@ -210,21 +271,23 @@ WallEvent.OnServerEvent:Connect(function(player, action, payload)
 	end
 end)
 
--- Win pads: claiming is the player's CHOICE. They can touch any time they
--- have unclaimed wins banked; claiming banks them and resets to Group 1.
+-- Win pads: touching one is the player's choice to bank pending wins.
+local function connectWinPad(part)
+	if not part:IsA("BasePart") then return end
+
+	part.Touched:Connect(function(hit)
+		local character = hit:FindFirstAncestorOfClass("Model")
+		local player = character and Players:GetPlayerFromCharacter(character)
+		if player then
+			claimWin(player)
+		end
+	end)
+end
+
 for _, group in ipairs(wallFolder:GetChildren()) do
 	for _, child in ipairs(group:GetChildren()) do
-		if child.Name:find("WinsGroup") and child:IsA("BasePart") then
-			child.Touched:Connect(function(hit)
-				local char = hit.Parent
-				local player = Players:GetPlayerFromCharacter(char)
-				if player then
-					local data = PlayerProgress[player.UserId]
-					if data and data.PendingWins > 0 then
-						claimWin(player)
-					end
-				end
-			end)
+		if child:IsA("BasePart") and child.Name:match("^WinsGroup%d+$") then
+			connectWinPad(child)
 		end
 	end
 end

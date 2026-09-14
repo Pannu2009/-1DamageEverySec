@@ -1,0 +1,22 @@
++1 Damage Every Sec - update notes
+
+Implemented:
+- WallConfig is now the canonical module name.
+- WallManager and WallSetup use the new WallConfig format (HP, not old Healths).
+- Fixed GetWinReward.
+- Fixed SwordClient -> WallManager payload mismatch.
+- Added server-side wall-hit distance/rate validation.
+- RebirthConfig is used by the server and FrontFaceGui.
+- Final damage is now: base Damage x Rebirth Multi x Sword Multi.
+- Default ServerStorage model is expected to be a Tool named "sword".
+- Default player Tool is normalized to "Sword" and tagged with SwordName="Rusty Sword".
+- SwordConfig currently contains Rusty Sword, Iron Blade, Void Blade.
+- Shards are now saved.
+- StatsGui was removed from the package; FrontFaceGui remains the main UI.
+- Completing a zone banks PendingWins but does NOT teleport the player, so they can continue forward.
+- Touching a WinsGroup pad claims PendingWins and returns the player to SpawnLocation.
+- Final boss files were intentionally left unchanged.
+
+Important:
+- The Iron Blade and Void Blade models are not assumed to exist yet.
+- When you add those models, they can be integrated into the sword selection/shop system later.
