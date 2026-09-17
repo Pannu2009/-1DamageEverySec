@@ -1,6 +1,3 @@
--- FrontFaceGui wiring module
--- Crowns.WinsLabel = wins | Damage.DamageLabel = current damage
--- ShopFrames.RebirthGui = toggle panel | RebirthPanel = rebirth UI
 
 local Players = game:GetService("Players")
 local Rep = game:GetService("ReplicatedStorage")
@@ -48,14 +45,12 @@ function module.Init()
 	local guiStore = gui:FindFirstChild("GuiStore")
 	local panel = guiStore and guiStore:FindFirstChild("RebirthPanel")
 
-	-- player stat values
 	local leaderstats = player:WaitForChild("leaderstats", 10)
 	local utils = player:WaitForChild("Utils", 10)
 	local wins = leaderstats and leaderstats:FindFirstChild("Wins")
 	local damage = utils and utils:FindFirstChild("Damage")
 	local rebirth = utils and utils:FindFirstChild("Rebirth")
 
-	-- Wins label
 	if winsLabel and wins then
 		local function updateWins()
 			winsLabel.Text = fmt(wins.Value)
@@ -64,7 +59,6 @@ function module.Init()
 		wins.Changed:Connect(updateWins)
 	end
 
-	-- Damage label (shows final damage = base * rebirth multiplier)
 	if damageLabel then
 		if damage then
 			damageLabel.Text = fmt(damage.Value * getMulti(rebirth and rebirth.Value or 0) * SwordConfig.GetMulti(SwordConfig.DefaultSword))
@@ -76,7 +70,6 @@ function module.Init()
 		end)
 	end
 
-	-- Rebirth panel
 	if panel then
 		panel.Visible = false
 
@@ -106,21 +99,18 @@ function module.Init()
 			rebirth.Changed:Connect(updatePanel)
 		end
 
-		-- open / close the panel
 		if openButton then
 			openButton.MouseButton1Click:Connect(function()
 				panel.Visible = not panel.Visible
 			end)
 		end
 
-		-- request a rebirth from the server
 		if rebirthBtn then
 			rebirthBtn.MouseButton1Click:Connect(function()
 				RebirthEvent:FireServer()
 			end)
 		end
 
-		-- server response feedback
 		RebirthEvent.OnClientEvent:Connect(function(success, message)
 			if rebirthBtn and message then
 				local original = rebirthBtn.Text
