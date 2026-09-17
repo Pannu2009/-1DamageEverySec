@@ -1,5 +1,5 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local WallConfig = require(ReplicatedStorage.Shared:WaitForChild("WallConfig"))
+local WallConfig = require(ReplicatedStorage.Shared:WaitForChild("WallsConfig"))
 local wallFolder = workspace:WaitForChild("Map"):WaitForChild("walls")
 
 for groupIndex, groupData in ipairs(WallConfig.Groups) do
