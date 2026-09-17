@@ -1,19 +1,16 @@
--- WallManager
--- Per-player wall progression stays client-visible, but damage is server validated.
--- Completing a group does NOT create pending/stacked rewards.
--- The reward for claiming is simply the group/level being claimed.
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local DataStoreService = game:GetService("DataStoreService")
 
-local WallConfig = require(ReplicatedStorage.Shared:WaitForChild("WallConfig"))
+local WallConfig = require(ReplicatedStorage.Shared:WaitForChild("WallsConfig"))
 local SwordConfig = require(ReplicatedStorage.Shared:WaitForChild("SwordConfig"))
 
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local WallEvent = Remotes:WaitForChild("WallEvent")
-local RebirthEvent = Remotes:WaitForChild("RebirthEvent")
 
 local wallFolder = workspace:WaitForChild("Map"):WaitForChild("walls")
+
+local ProgressStore = DataStoreService:GetDataStore("WallProgress")
 
 local PlayerProgress = {}
 local claimDebounce = {}
@@ -63,17 +60,24 @@ local function notifyProgress(player)
 	local group = WallConfig.Groups[data.GroupIndex]
 	if not group then return end
 
+	local zoneName = group.Name
+	if group.IsInfinity and data.InfinityLevel > 1 then
+		zoneName = zoneName .. " x" .. data.InfinityLevel
+	end
+
 	WallEvent:FireClient(player, "Progress", {
-		Zone = group.Name,
+		Zone = zoneName,
 		GroupIndex = data.GroupIndex,
 		WallIndex = data.WallIndex,
+		Total = #WallConfig.Groups,
+		InfinityLevel = data.InfinityLevel,
 	})
 end
 
 local function notifyNewWall(player)
 	local data = PlayerProgress[player.UserId]
 	if not data then return end
-	local maxHp = WallConfig.GetMaxHp(data.GroupIndex, data.WallIndex)
+	local maxHp = WallConfig.GetEffectiveMaxHp(data.GroupIndex, data.WallIndex, data.InfinityLevel)
 	if maxHp <= 0 then return end
 
 	WallEvent:FireClient(player, "NewWall", {
@@ -81,6 +85,7 @@ local function notifyNewWall(player)
 		WallIndex = data.WallIndex,
 		HP = data.CurrentHP,
 		MaxHP = maxHp,
+		Overflow = data.Overflow or 0,
 	})
 end
 
@@ -90,6 +95,8 @@ local function resetProgress(player)
 
 	data.GroupIndex = 1
 	data.WallIndex = 1
+	data.InfinityLevel = 1
+	data.Overflow = 0
 	data.CurrentHP = WallConfig.GetMaxHp(1, 1)
 
 	WallEvent:FireClient(player, "ResetProgress")
@@ -105,6 +112,30 @@ local function teleportToSpawn(player)
 	end
 end
 
+local teleportDebounce = {}
+
+local function teleportToZone(player)
+	local userId = player.UserId
+	if teleportDebounce[userId] then return end
+
+	local data = PlayerProgress[userId]
+	if not data then return end
+
+	local groupFolder = wallFolder:FindFirstChild("Group" .. data.GroupIndex)
+	local wall1 = groupFolder and groupFolder:FindFirstChild("Wall1")
+	if not wall1 then return end
+
+	teleportDebounce[userId] = true
+	task.delay(5, function()
+		teleportDebounce[userId] = nil
+	end)
+
+	local char = player.Character
+	if char then
+		char:PivotTo(CFrame.new(wall1.Position.X + 8, 3, wall1.Position.Z))
+	end
+end
+
 local function claimGroup(player, groupIndex)
 	local userId = player.UserId
 	if claimDebounce[userId] then return end
@@ -115,9 +146,13 @@ local function claimGroup(player, groupIndex)
 	groupIndex = tonumber(groupIndex)
 	if not groupIndex or groupIndex < 1 or groupIndex > #WallConfig.Groups then return end
 
-	-- You can only claim a group after reaching past its final wall.
-	-- No old groups are added together: the claimed reward is exactly the group level.
-	if data.GroupIndex <= groupIndex then
+	local isInfinity = WallConfig.IsInfinityGroup(groupIndex)
+	if isInfinity then
+		-- Infinity pad: must be in the Infinity Zone with at least one full loop completed
+		if data.GroupIndex ~= groupIndex or data.InfinityLevel <= 1 then
+			return
+		end
+	elseif data.GroupIndex <= groupIndex then
 		return
 	end
 
@@ -130,17 +165,80 @@ local function claimGroup(player, groupIndex)
 	local wins = stats and stats:FindFirstChild("Wins")
 	if not wins then return end
 
-	wins.Value += groupIndex
+	wins.Value += WallConfig.GetInfinityReward(groupIndex, data.InfinityLevel)
 	teleportToSpawn(player)
 	resetProgress(player)
 end
 
+local function loadProgress(userId)
+	local success, saved = pcall(function()
+		return ProgressStore:GetAsync("Progress_" .. userId)
+	end)
+	if not success or typeof(saved) ~= "table" then return nil end
+	return saved
+end
+
+local function saveProgress(player)
+	local data = PlayerProgress[player.UserId]
+	if not data then return end
+
+	local success, err = pcall(function()
+		ProgressStore:SetAsync("Progress_" .. player.UserId, {
+			GroupIndex = data.GroupIndex,
+			WallIndex = data.WallIndex,
+			InfinityLevel = data.InfinityLevel,
+			Overflow = data.Overflow or 0,
+		})
+	end)
+	if not success then
+		warn("WallManager: failed to save progress for " .. player.Name .. ": " .. tostring(err))
+	end
+end
+
 local function onPlayerAdded(player)
+	local saved = loadProgress(player.UserId)
+
+	local groupIndex = 1
+	local wallIndex = 1
+	local infinityLevel = 1
+
+	if saved then
+		local sGroup = tonumber(saved.GroupIndex) or 1
+		local sWall = tonumber(saved.WallIndex) or 1
+		local sInfinity = tonumber(saved.InfinityLevel) or 1
+
+		if sGroup >= 1 and sGroup <= #WallConfig.Groups then
+			groupIndex = sGroup
+			wallIndex = math.clamp(sWall, 1, WallConfig.GetWallCount(groupIndex))
+			infinityLevel = math.max(sInfinity, 1)
+		end
+	end
+
 	PlayerProgress[player.UserId] = {
-		GroupIndex = 1,
-		WallIndex = 1,
-		CurrentHP = WallConfig.GetMaxHp(1, 1),
+		GroupIndex = groupIndex,
+		WallIndex = wallIndex,
+		InfinityLevel = infinityLevel,
+		CurrentHP = WallConfig.GetEffectiveMaxHp(groupIndex, wallIndex, infinityLevel),
+		Overflow = math.max(tonumber(saved and saved.Overflow) or 0, 0),
 	}
+
+	task.spawn(function()
+		local utils = player:WaitForChild("Utils", 15)
+		local rebirth = utils and utils:WaitForChild("Rebirth", 10)
+		if rebirth then
+			rebirth.Changed:Connect(function()
+				resetProgress(player)
+			end)
+		end
+	end)
+
+	player.CharacterAdded:Connect(function()
+		task.wait(0.5)
+		if PlayerProgress[player.UserId] then
+			notifyNewWall(player)
+			notifyProgress(player)
+		end
+	end)
 
 	task.delay(1, function()
 		if PlayerProgress[player.UserId] then
@@ -156,15 +254,108 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 
 Players.PlayerRemoving:Connect(function(player)
+	saveProgress(player)
 	local userId = player.UserId
 	PlayerProgress[userId] = nil
 	claimDebounce[userId] = nil
 	hitDebounce[userId] = nil
+	teleportDebounce[userId] = nil
 end)
 
-RebirthEvent.OnServerEvent:Connect(function(player)
-	resetProgress(player)
+game:BindToClose(function()
+	for _, player in ipairs(Players:GetPlayers()) do
+		saveProgress(player)
+	end
 end)
+
+local function applyWallDamage(player, damage)
+	local data = PlayerProgress[player.UserId]
+	if not data then return end
+
+	local char = player.Character
+	local hrp = char and char:FindFirstChild("HumanoidRootPart")
+	if not hrp then return end
+
+	-- combine any stored overflow with this hit
+	local remaining = damage + (data.Overflow or 0)
+	data.Overflow = 0
+
+	local guardCount = 0
+	local advanced = false
+
+	-- overflow loop: leftover damage keeps hitting the next wall
+	while remaining > 0 and guardCount < 200 do
+		guardCount += 1
+
+		local wall = getWall(data.GroupIndex, data.WallIndex)
+		if not wall then break end
+
+		-- can only damage walls within reach; if the next wall is too far
+		-- (e.g. next group's zone), store the leftover for the next hit
+		if (hrp.Position - wall.Position).Magnitude > MAX_HIT_DISTANCE then
+			data.Overflow = remaining
+			remaining = 0
+			break
+		end
+
+		if remaining < data.CurrentHP then
+			-- wall survives, absorb the hit
+			data.CurrentHP -= remaining
+			remaining = 0
+			WallEvent:FireClient(player, "Damage", {
+				GroupIndex = data.GroupIndex,
+				WallIndex = data.WallIndex,
+				HP = data.CurrentHP,
+				MaxHP = WallConfig.GetEffectiveMaxHp(data.GroupIndex, data.WallIndex, data.InfinityLevel),
+			})
+		else
+			-- wall breaks, leftover carries to the next wall
+			remaining -= data.CurrentHP
+
+			WallEvent:FireClient(player, "BreakWall", {
+				GroupIndex = data.GroupIndex,
+				WallIndex = data.WallIndex,
+			})
+
+			data.WallIndex += 1
+			advanced = true
+
+			if data.WallIndex > WallConfig.GetWallCount(data.GroupIndex) then
+				if WallConfig.IsInfinityGroup(data.GroupIndex) then
+					-- Infinity Zone: loop forever with scaling HP
+					data.InfinityLevel += 1
+					data.WallIndex = 1
+				else
+					local nextGroup = data.GroupIndex + 1
+					data.GroupIndex = nextGroup
+					data.WallIndex = 1
+				end
+			end
+			data.CurrentHP = WallConfig.GetEffectiveMaxHp(data.GroupIndex, data.WallIndex, data.InfinityLevel)
+		end
+	end
+
+	-- safety net: if the guard limit was hit, keep the leftover instead of losing it
+	if remaining > 0 then
+		data.Overflow = (data.Overflow or 0) + remaining
+		remaining = 0
+	end
+
+	if advanced then
+		notifyProgress(player)
+		notifyNewWall(player)
+	elseif (data.Overflow or 0) > 0 then
+		-- leftover was stored because the next wall is out of reach;
+		-- update the HUD so the player can see the stored damage
+		WallEvent:FireClient(player, "Damage", {
+			GroupIndex = data.GroupIndex,
+			WallIndex = data.WallIndex,
+			HP = data.CurrentHP,
+			MaxHP = WallConfig.GetEffectiveMaxHp(data.GroupIndex, data.WallIndex, data.InfinityLevel),
+			Overflow = data.Overflow,
+		})
+	end
+end
 
 WallEvent.OnServerEvent:Connect(function(player, action, payload)
 	local data = PlayerProgress[player.UserId]
@@ -178,69 +369,32 @@ WallEvent.OnServerEvent:Connect(function(player, action, payload)
 		if not groupIndex or not wallIndex then return end
 		if groupIndex ~= data.GroupIndex or wallIndex ~= data.WallIndex then return end
 
-		local wall = getWall(data.GroupIndex, data.WallIndex)
-		if not wall then return end
-
-		local char = player.Character
-		local hrp = char and char:FindFirstChild("HumanoidRootPart")
-		if not hrp then return end
-		if (hrp.Position - wall.Position).Magnitude > MAX_HIT_DISTANCE then return end
-
 		local now = os.clock()
 		local lastHit = hitDebounce[player.UserId] or 0
 		if now - lastHit < SERVER_HIT_COOLDOWN then return end
 		hitDebounce[player.UserId] = now
 
+		local char = player.Character
 		local sword = getPlayerSword(player)
 		if not sword or not sword:IsA("Tool") or sword.Parent ~= char then return end
 
-		local damage = getSwordDamage(player)
-		data.CurrentHP = math.max(0, data.CurrentHP - damage)
-
-		if data.CurrentHP <= 0 then
-			local brokenGroup = data.GroupIndex
-			local brokenWall = data.WallIndex
-
-			WallEvent:FireClient(player, "BreakWall", {
-				GroupIndex = brokenGroup,
-				WallIndex = brokenWall,
-			})
-
-			data.WallIndex += 1
-
-			if data.WallIndex > WallConfig.GetWallCount(data.GroupIndex) then
-				-- Finished this group. The next group becomes the player's level.
-				-- There is NO PendingWins value and no stacked reward.
-				local nextGroup = data.GroupIndex + 1
-				if WallConfig.Groups[nextGroup] then
-					data.GroupIndex = nextGroup
-					data.WallIndex = 1
-					data.CurrentHP = WallConfig.GetMaxHp(nextGroup, 1)
-				else
-					data.WallIndex = WallConfig.GetWallCount(data.GroupIndex)
-					data.CurrentHP = 0
-				end
-			else
-				data.CurrentHP = WallConfig.GetMaxHp(data.GroupIndex, data.WallIndex)
-			end
-
-			notifyProgress(player)
-			notifyNewWall(player)
-		else
-			WallEvent:FireClient(player, "Damage", {
-				GroupIndex = data.GroupIndex,
-				WallIndex = data.WallIndex,
-				HP = data.CurrentHP,
-				MaxHP = WallConfig.GetMaxHp(data.GroupIndex, data.WallIndex),
-			})
-		end
+		applyWallDamage(player, getSwordDamage(player))
 
 	elseif action == "ClaimWin" then
 		claimGroup(player, payload)
+
+	elseif action == "TeleportToZone" then
+		teleportToZone(player)
 	end
 end)
 
--- Every claim pad awards ONLY its own group number.
+local petBindable = Instance.new("BindableEvent")
+petBindable.Name = "PetDamage"
+petBindable.Parent = script.Parent
+petBindable.Event:Connect(function(player, damage)
+	applyWallDamage(player, damage)
+end)
+
 local function connectWinPad(part)
 	if not part:IsA("BasePart") then return end
 	local groupIndex = tonumber(part.Name:match("^WinsGroup(%d+)$"))
