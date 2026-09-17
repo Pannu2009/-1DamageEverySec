@@ -1,6 +1,3 @@
--- SwordClient
--- Runs from PlayerScripts/Init and wires every sword Tool to wall attacks.
--- The client only tells the server which wall it is trying to hit.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
