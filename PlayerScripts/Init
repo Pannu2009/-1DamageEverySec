@@ -1,7 +1,9 @@
--- Client init: wires up all UI and gameplay client modules
-
 local FrontFaceGui = require(script:WaitForChild("FrontFaceGui"))
 local SwordClient = require(game:GetService("ReplicatedStorage").Shared:WaitForChild("SwordClient"))
+local WinsShopClient = require(script:WaitForChild("WinsShopClient"))
+local ChestShop = require(script:WaitForChild("ChestShop"))
 
 FrontFaceGui.Init()
 SwordClient.Init()
+WinsShopClient.Init()
+ChestShop.Init()
