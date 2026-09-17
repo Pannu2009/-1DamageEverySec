@@ -17,8 +17,8 @@ BossConfig.ArenaSetup = { -- Worte 0 as its not made yet
 }
 
 BossConfig.BossDivision = {
-	HpMultiplier           = 120, -- BossHp = playerTotalDamage * 120
-	PillarsCount           = 5,   -- 5 Pilar + 2x BossBody = 7 parts
+	HpMultiplier           = 120, -- BossHp = playerTotalDamage * 120 cause hard 
+	PillarsCount           = 5,   -- 5 Pilar + 2x BossBody = 7 parts 
 	PilarHpDivison         = 7,   -- BossHp / 7 = 1 Pilar Hp 
 	
 }
@@ -35,9 +35,9 @@ BossConfig.SpecialTable = {
 	{Name = "Void   King",       Chance = 45,      ShardBonus = 0.65,      LootSword = "Void Blade",      },
 }
 
-function BossConfig.RollTrait(BossCount) -- Every 12th Boss in a server will be a Special Boss from Greedy Goblin or Void Goblin
+function BossConfig.RollTrait(BossCount) 
 	local Count = BossCount
-	if Count >= 12 then  -- Boss 2 and 3 will be Special Boss if over 12 or == 12
+	if Count >= 12 then 
 		local Table_Special = BossConfig.SpecialTable
 		local roll = math.random(1, 100)
 		local cumulativeChance = 0
