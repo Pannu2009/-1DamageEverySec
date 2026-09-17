@@ -1,8 +1,1 @@
 Update v2
-- Fixed sword clicking by initializing SwordClient from PlayerScripts/Init and connecting Tool.Activated for the equipped sword.
-- Increased client wall raycast range to 16 studs and server validation range to 18 studs.
-- Rusty Sword multiplier is now 0.5x, and the damage GUI uses the sword multiplier.
-- Removed PendingWins / stacked pending rewards completely.
-- Claiming WinsGroupN now awards exactly N Wins, never group 1 + group 2 + etc.
-- Player progression remains per-player on the client: WallClient locally opens only that player's broken walls.
-- Completing a group advances the player's level/group without teleporting.
