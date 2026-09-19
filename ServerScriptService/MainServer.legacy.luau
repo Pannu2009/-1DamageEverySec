@@ -5,9 +5,8 @@
 local Players = game:GetService("Players")
 local Rep = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
-local DataStoreService = game:GetService("DataStoreService")
 
-local DataStore = DataStoreService:GetDataStore("PlayerData")
+local DataHandler = require(script.Parent:WaitForChild("DataHandler"))
 
 local RebirthConfig = require(Rep.Shared:WaitForChild("RebirthConfig",30))
 local SwordConfig = require(Rep.Shared:WaitForChild("SwordConfig"))
@@ -191,11 +190,9 @@ local function setupPlayer(player)
 	equippedPet.Value = ""
 	equippedPet.Parent = shop
 
-	local success, data = pcall(function()
-		return DataStore:GetAsync("Player_" .. player.UserId)
-	end)
+	local data = DataHandler:Load(player)
 
-	if success and typeof(data) == "table" then
+	if data then
 		damage.Value = tonumber(data.Damage) or 1
 		wins.Value = tonumber(data.Wins) or 0
 		rebirth.Value = tonumber(data.Rebirths) or 0
@@ -235,39 +232,7 @@ local function setupPlayer(player)
 end
 
 local function savePlayer(player)
-	local stats = player:FindFirstChild("leaderstats")
-	local utils = player:FindFirstChild("Utils")
-	local shop = player:FindFirstChild("Shop")
-	if not (stats and utils and shop) then return end
-
-	local wins = stats:FindFirstChild("Wins")
-	local shards = stats:FindFirstChild("Shards")
-	local damage = utils:FindFirstChild("Damage")
-	local rebirth = utils:FindFirstChild("Rebirth")
-	local cosmetics = shop:FindFirstChild("Cosmetics")
-	local pets = shop:FindFirstChild("Pets")
-	local equippedCosmetic = shop:FindFirstChild("EquippedCosmetic")
-	local equippedPet = shop:FindFirstChild("EquippedPet")
-	if not (wins and shards and damage and rebirth and cosmetics and pets and equippedCosmetic and equippedPet) then return end
-
-	local data = {
-		Wins = wins.Value,
-		Damage = damage.Value,
-		Rebirths = rebirth.Value,
-		Shards = shards.Value,
-		Cosmetics = cosmetics.Value,
-		Pets = pets.Value,
-		EquippedCosmetic = equippedCosmetic.Value,
-		EquippedPet = equippedPet.Value,
-	}
-
-	local success, err = pcall(function()
-		DataStore:SetAsync("Player_" .. player.UserId, data)
-	end)
-
-	if not success then
-		warn("Failed to save " .. player.Name .. ": " .. tostring(err))
-	end
+	DataHandler:Save(player)
 end
 
 RebirthEvent.OnServerEvent:Connect(function(player)

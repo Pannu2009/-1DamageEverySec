@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local DataStoreService = game:GetService("DataStoreService")
+
+local DataHandler = require(script.Parent.Parent:WaitForChild("DataHandler"))
 
 local WallConfig = require(ReplicatedStorage.Shared:WaitForChild("WallsConfig"))
 local SwordConfig = require(ReplicatedStorage.Shared:WaitForChild("SwordConfig"))
@@ -9,8 +10,6 @@ local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local WallEvent = Remotes:WaitForChild("WallEvent")
 
 local wallFolder = workspace:WaitForChild("Map"):WaitForChild("walls")
-
-local ProgressStore = DataStoreService:GetDataStore("WallProgress")
 
 local PlayerProgress = {}
 local claimDebounce = {}
@@ -170,33 +169,8 @@ local function claimGroup(player, groupIndex)
 	resetProgress(player)
 end
 
-local function loadProgress(userId)
-	local success, saved = pcall(function()
-		return ProgressStore:GetAsync("Progress_" .. userId)
-	end)
-	if not success or typeof(saved) ~= "table" then return nil end
-	return saved
-end
-
-local function saveProgress(player)
-	local data = PlayerProgress[player.UserId]
-	if not data then return end
-
-	local success, err = pcall(function()
-		ProgressStore:SetAsync("Progress_" .. player.UserId, {
-			GroupIndex = data.GroupIndex,
-			WallIndex = data.WallIndex,
-			InfinityLevel = data.InfinityLevel,
-			Overflow = data.Overflow or 0,
-		})
-	end)
-	if not success then
-		warn("WallManager: failed to save progress for " .. player.Name .. ": " .. tostring(err))
-	end
-end
-
 local function onPlayerAdded(player)
-	local saved = loadProgress(player.UserId)
+	local saved = DataHandler:LoadWallProgress(player)
 
 	local groupIndex = 1
 	local wallIndex = 1
@@ -254,7 +228,10 @@ for _, player in ipairs(Players:GetPlayers()) do
 end
 
 Players.PlayerRemoving:Connect(function(player)
-	saveProgress(player)
+	local data = PlayerProgress[player.UserId]
+	if data then
+		DataHandler:SaveWallProgress(player, data.GroupIndex, data.WallIndex, data.InfinityLevel, data.Overflow or 0)
+	end
 	local userId = player.UserId
 	PlayerProgress[userId] = nil
 	claimDebounce[userId] = nil
@@ -264,7 +241,23 @@ end)
 
 game:BindToClose(function()
 	for _, player in ipairs(Players:GetPlayers()) do
-		saveProgress(player)
+		local data = PlayerProgress[player.UserId]
+		if data then
+			DataHandler:SaveWallProgress(player, data.GroupIndex, data.WallIndex, data.InfinityLevel, data.Overflow or 0)
+		end
+	end
+end)
+
+-- Autosave: periodically saves every online player's wall progress.
+task.spawn(function()
+	while true do
+		task.wait(120)
+		for _, player in ipairs(Players:GetPlayers()) do
+			local data = PlayerProgress[player.UserId]
+			if data then
+				DataHandler:SaveWallProgress(player, data.GroupIndex, data.WallIndex, data.InfinityLevel, data.Overflow or 0)
+			end
+		end
 	end
 end)
 

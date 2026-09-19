@@ -7,9 +7,9 @@ local Player = Players.LocalPlayer
 local Remotes = ReplicatedStorage.Remotes
 local ShopEvent = Remotes.ShopEvent
 
-local roundTable = workspace:WaitForChild("Map"):WaitForChild("RoundTable")
-local Table = roundTable.Interupt -- chest shop opener
-local Chests = roundTable.Chests
+local roundTable = workspace:WaitForChild("Map"):WaitForChild("ChestTable"):WaitForChild("RoundTable")
+local Table = workspace:WaitForChild("Map"):WaitForChild("ChestTable"):WaitForChild("Interupt")
+local Chests = roundTable:WaitForChild("Chests")
 
 local Gui = Player:WaitForChild("PlayerGui"):WaitForChild("FrontFaceGui")
 local frame = Gui:WaitForChild("GuiStore"):WaitForChild("ChestShopPanel")
@@ -27,8 +27,6 @@ local inShop = false
 local selectChest = 1
 local chestModels = {}
 local touchDebounce = false
-
--- ===== Highlight helpers =====
 
 function ChestModule.RemoveHilight(Chest)
 	for _, d in ipairs(Chest:GetDescendants()) do
@@ -87,7 +85,6 @@ function ChestModule.AddHilight(Chest)
 	return true
 end
 
--- Highlight only the currently selected chest
 local function updateHilight()
 	for _, model in ipairs(chestModels) do
 		ChestModule.RemoveHilight(model)
@@ -97,8 +94,6 @@ local function updateHilight()
 		ChestModule.AddHilight(model)
 	end
 end
-
--- ===== GUI =====
 
 local function fmt(n)
 	n = tonumber(n) or 0
@@ -144,10 +139,23 @@ function ChestModule.CloseShop()
 	end
 end
 
--- ===== Init =====
+function TableRotation()
+	local chestFc = workspace:WaitForChild("Map").ChestTable
+	local rotatinSpeed = 1.5
+	local anngle = 0
+	
+	local oriPivot = chestFc:GetPivot()
+	if inShop then return end
+	while true do
+		local ft = task.wait()
+		if not inShop then
+			anngle = anngle + (rotatinSpeed * ft)
+			chestFc:PivotTo(oriPivot * CFrame.Angles(anngle,0,0))
+		end
+	end
+end
 
 function ChestModule.Init()
-	-- map chest models to config order (Green, Red, Pink -> Wooden, Golden, Cosmic)
 	chestModels = Chests:GetChildren()
 
 	frame.Visible = false
@@ -181,7 +189,6 @@ function ChestModule.Init()
 		updatePanel()
 	end)
 
-	-- open the selected chest (server rolls the reward)
 	OpenBtn.MouseButton1Click:Connect(function()
 		local chest = Config[selectChest]
 		if chest then
@@ -189,7 +196,6 @@ function ChestModule.Init()
 		end
 	end)
 
-	-- touch the round table to open the shop
 	Table.Touched:Connect(function(hit)
 		if touchDebounce then return end
 		local character = hit:FindFirstAncestorOfClass("Model")
@@ -202,7 +208,6 @@ function ChestModule.Init()
 		end
 	end)
 
-	-- auto-close when the player walks away from the table
 	task.spawn(function()
 		while true do
 			task.wait(0.5)
@@ -215,8 +220,8 @@ function ChestModule.Init()
 			end
 		end
 	end)
+	task.spawn(TableRotation)
 
-	-- results / errors from the server
 	ShopEvent.OnClientEvent:Connect(function(action, payload)
 		if action == "ChestResult" and typeof(payload) == "table" then
 			local text
@@ -235,11 +240,5 @@ function ChestModule.Init()
 		end
 	end)
 end
-
--- to do list
--- every chest have camera -- Might need to adjust angle a bit
--- make round table rotate for each player (client-side only)
--- chest open animation + show item, close back after 5 sec
--- vfx on chests
 
 return ChestModule
